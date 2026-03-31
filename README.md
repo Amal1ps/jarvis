@@ -10,11 +10,11 @@ Jarvis is an autonomous security research assistant powered by Llama 3.3 (via Gr
 
 ### 🛠️ Setup
 1. **Clone the repo:**
-   `git clone https://github.com/yourusername/jarvis.git && cd jarvis`
+   `git clone https://github.com/Amal1ps/jarvis.git && cd jarvis`
 2. **Install requirements:**
    `pip install requests`
 3. **Set your Groq API Key:**
-   `export GROQ_API_KEY='your_key_here'`
+   `export GROQ_API_KEY='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'`
 4. **Run it:**
    `python jarvis.py`
 
