@@ -1,0 +1,134 @@
+import requests
+import json
+import os
+import subprocess
+from datetime import datetime
+
+# --- Configuration ---
+# Pro-tip: For GitHub, use an Environment Variable for your API Key instead of hardcoding it!
+API_KEY = os.getenv("GROQ_API_KEY", "YOUR_GROQ_API_KEY")
+MODEL = "llama-3.3-70b-versatile" 
+MODE = "chat"
+
+def save_report_to_file(goal, report_content):
+    """Saves the final report to the reports/ folder with a timestamp."""
+    if not os.path.exists("reports"):
+        os.makedirs("reports")
+    
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"reports/audit_{timestamp}.md"
+    
+    with open(filename, "w") as f:
+        f.write(f"# Jarvis Security Audit Report\n")
+        f.write(f"**Target Goal:** {goal}\n")
+        f.write(f"**Date:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
+        f.write(report_content)
+    
+    print(f"[*] Report saved to: {filename}")
+
+def get_jarvis_action(user_input, last_output=None, history=None):
+    system_prompt = (
+        "SYSTEM: AUTONOMOUS_PENTEST_AGENT. Operating on Kali Linux. "
+        "Goal: Complete the user's security task. "
+        "KALI COMMAND HINTS: "
+        "- Use 'msfconsole' for Metasploit. "
+        "- Use 'searchsploit [term]' for finding REAL exploits. "
+        "- Use 'gobuster dir -u [url] -w /usr/share/wordlists/dirb/common.txt' for directories. "
+        "CRITICAL: Do NOT repeat commands. If a tool fails, try a different approach. "
+        "If you have enough evidence, return 'FINISH'. "
+        "OUTPUT ONLY RAW JSON: "
+        '{"reasoning": "...", "tool": "tool_name", "args": ["-flags"], "target": "target"}'
+    )
+    
+    context = f"Goal: {user_input}\nHistory: {history}\nLast Output: {last_output[-1500:] if last_output else 'Initial Step'}"
+    
+    try:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            json={"model": MODEL, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": context}], "temperature": 0.0}
+        )
+        return resp.json()["choices"][0]["message"]["content"].strip()
+    except: return '{"tool": "FINISH"}'
+
+def generate_final_summary(goal, full_log):
+    print("\n[*] Jarvis is performing a Fact-Check and generating the report...")
+    summary_prompt = (
+        "You are a Senior Security Auditor. Review the 'Audit Log' below. "
+        "STRICT RULES: "
+        "1. Only report vulnerabilities EXPLICITLY FOUND in the log text. "
+        "2. DO NOT invent CVEs or use internal knowledge about the domain. "
+        "3. If a tool reports a version, check if searchsploit output was provided for it. "
+        "FORMAT: [Audit Summary], [Verified Findings], [Remediation]."
+    )
+    context = f"User Goal: {goal}\n\n--- ACTUAL AUDIT DATA ---\n{full_log[-8000:]}"
+
+    try:
+        resp = requests.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {API_KEY}"},
+            json={"model": MODEL, "messages": [{"role": "system", "content": summary_prompt}, {"role": "user", "content": context}],"temperature": 0.0}
+        )
+        return resp.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"Summary Error: {e}"
+
+# --- Main Loop ---
+print("""
+     ██╗ █████╗ ██████╗ ██╗   ██╗██╗███████╗
+     ██║██╔══██╗██╔══██╗██║   ██║██║██╔════╝
+     ██║███████║██████╔╝██║   ██║██║███████╗
+██   ██║██╔══██║██╔══██╗╚██╗ ██╔╝██║╚════██║
+╚█████╔╝██║  ██║██║  ██║ ╚████╔╝ ██║███████║
+ ╚════╝ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚═╝╚══════╝
+      Agentic Security Framework | GitHub Ready
+""")
+
+while True:
+    user_input = input(f"({MODE}) You > ").strip()
+    if not user_input: continue
+    if user_input.lower() == "exit": break
+
+    if user_input.lower().startswith("mode "):
+        requested = user_input.lower().split(" ")[1]
+        if requested in ["chat", "work"]:
+            MODE = requested
+            print(f"Jarvis > Mode: {MODE.upper()} 🛠️")
+        continue
+
+    if MODE == "work":
+        last_tool_result, full_audit_log, tool_history = "", "", []
+        
+        for i in range(6):
+            ai_decision = get_jarvis_action(user_input, last_tool_result, tool_history)
+            try:
+                data = json.loads(ai_decision.replace("```json", "").replace("```", "").strip())
+                tool = data.get("tool", "FINISH")
+                if tool.upper() == "FINISH" or tool == "None": break
+
+                full_cmd = f"{tool} {' '.join(data.get('args', []))} {data.get('target', '')}"
+                if full_cmd in tool_history: continue
+
+                print(f"\n[STEP {i+1}] {data.get('reasoning')}")
+                print(f"[ACTION] {full_cmd}")
+                
+                confirm = input("Execute? (y/n/skip): ").lower()
+                if confirm == 'y':
+                    process = subprocess.run(full_cmd, shell=True, capture_output=True, text=True)
+                    last_tool_result = process.stdout + process.stderr
+                    tool_history.append(full_cmd)
+                    full_audit_log += f"\n--- STEP {i+1}: {full_cmd} ---\n{last_tool_result}\n"
+                elif confirm != 'skip': break
+            except: break
+        
+        report = generate_final_summary(user_input, full_audit_log)
+        print("\n" + "="*50 + "\n" + report + "\n" + "="*50)
+        save_report_to_file(user_input, report)
+
+    else:
+        try:
+            resp = requests.post("https://api.groq.com/openai/v1/chat/completions",
+                headers={"Authorization": f"Bearer {API_KEY}"},
+                json={"model": MODEL, "messages": [{"role": "system", "content": "You are Jarvis, a witty assistant."}, {"role": "user", "content": user_input}]})
+            print(f"Jarvis > {resp.json()['choices'][0]['message']['content']}")
+        except: print("Jarvis > Connection error.")
